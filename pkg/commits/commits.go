@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"ioutil"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/go-chi/chi"
 
 	"github.com/redhatinsights/edge-api/config"
+	"github.com/redhatinsights/edge-api/pkg/common"
 	"github.com/redhatinsights/edge-api/pkg/db"
 	"github.com/redhatinsights/platform-go-middlewares/identity"
 	"gorm.io/gorm"
@@ -303,4 +306,17 @@ func untar(rc io.ReadCloser, dst string) error {
 		}
 	}
 	return nil
+}
+
+func buildOSTreeRepo(path string, c *Commit) {
+	common.DownloadURLToFile(c.ImageBuildTarURL, filepath.Join(path, c.OSTreeRef, ".tar"))
+
+	tar_fd = ioutil.ReadFile(filepath.Join(c.OSTreeRef, ".tar"))
+	untar(tar_fd)
+	cmd.Dir = filepath.Dir(path)
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }

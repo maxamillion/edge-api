@@ -72,7 +72,7 @@ func ReturnDevices(w http.ResponseWriter, r *http.Request) (Inventory, error) {
 
 // ReturnDevicesByID will return the list of devices by uuid
 func ReturnDevicesByID(w http.ResponseWriter, r *http.Request) (Inventory, error) {
-	deviceID := r.URL.Query().Get("device_uuid")
+	deviceID := r.URL.Query().Get("DeviceUUID")
 	deviceIDParam := "&hostname_or_id=" + deviceID
 
 	url := fmt.Sprintf("%s/api/inventory/v1/hosts", config.Get().InventoryConfig.URL)

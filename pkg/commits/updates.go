@@ -42,9 +42,9 @@ func getCommitFromDB(commitID uint) (*models.Commit, error) {
 	return &commit, nil
 }
 
-func updateFromReadCloser(rc io.ReadCloser) (*models.UpdateRecord, error) {
+func updateFromReadCloser(rc io.ReadCloser) (*models.UpdateTransaction, error) {
 	defer rc.Close()
-	var update models.UpdateRecord
+	var update models.UpdateTransaction
 	err := json.NewDecoder(rc).Decode(&update)
 
 	log.Debugf("updateFromReadCloser::update: %#v", update)
@@ -76,12 +76,13 @@ const updateKey key = 0
 // UpdateCtx is a handler for Update requests
 func UpdateCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var update models.UpdateRecord
+		var update models.UpdateTransaction
 		account, err := common.GetAccount(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		log.Debugf("UpdateCtx::update: %#v", update)
 		if updateID := chi.URLParam(r, "updateID"); updateID != "" {
 			id, err := strconv.Atoi(updateID)
 			if err != nil {
@@ -103,6 +104,7 @@ func UpdateCtx(next http.Handler) http.Handler {
 func UpdatesAdd(w http.ResponseWriter, r *http.Request) {
 
 	update, err := updateFromReadCloser(r.Body)
+	log.Debugf("UpdatesAdd::update: %#v", update)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -116,9 +118,9 @@ func UpdatesAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Check to make sure we're not duplicating the job
 	// FIXME - this didn't work and I don't have time to debug right now
-	// FIXME - handle UpdateRecord Commit vs UpdateCommitID
+	// FIXME - handle UpdateTransaction Commit vs UpdateCommitID
 	/*
-		var dupeRecord models.UpdateRecord
+		var dupeRecord models.UpdateTransaction
 		queryDuplicate := map[string]interface{}{
 			"Account":        update.Account,
 			"InventoryHosts": update.InventoryHosts,
@@ -140,20 +142,6 @@ func UpdatesAdd(w http.ResponseWriter, r *http.Request) {
 
 // UpdatesGetAll update objects from the database for an account
 func UpdatesGetAll(w http.ResponseWriter, r *http.Request) {
-	var updates []models.UpdateRecord
-	account, err := common.GetAccount(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	// FIXME - need to sort out how to get this query to be against commit.account
-	result := db.DB.Where("account = ?", account).Find(&updates)
-	if result.Error != nil {
-		http.Error(w, result.Error.Error(), http.StatusBadRequest)
-		return
-	}
-
-	json.NewEncoder(w).Encode(&updates)
 }
 
 // UpdatesGetByID obtains an update from the database for an account
@@ -184,9 +172,9 @@ func UpdatesUpdate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(incoming)
 }
 
-func getUpdate(w http.ResponseWriter, r *http.Request) *models.UpdateRecord {
+func getUpdate(w http.ResponseWriter, r *http.Request) *models.UpdateTransaction {
 	ctx := r.Context()
-	update, ok := ctx.Value(updateKey).(*models.UpdateRecord)
+	update, ok := ctx.Value(updateKey).(*models.UpdateTransaction)
 	if !ok {
 		http.Error(w, "must pass id", http.StatusBadRequest)
 		return nil
@@ -196,7 +184,7 @@ func getUpdate(w http.ResponseWriter, r *http.Request) *models.UpdateRecord {
 
 // RepoBuilderInterface defines the interface of a repository builder
 type RepoBuilderInterface interface {
-	BuildRepo(ur *models.UpdateRecord) (*models.UpdateRecord, error)
+	BuildRepo(ur *models.UpdateTransaction) (*models.UpdateTransaction, error)
 }
 
 // RepoBuilder is the implementation of a RepoBuilderInterface
@@ -204,13 +192,13 @@ type RepoBuilder struct{}
 
 // BuildRepo build an update repo with the set of commits all merged into a single repo
 // with static deltas generated between them all
-func (rb *RepoBuilder) BuildRepo(ur *models.UpdateRecord) (*models.UpdateRecord, error) {
+func (rb *RepoBuilder) BuildRepo(ur *models.UpdateTransaction) (*models.UpdateTransaction, error) {
 	cfg := config.Get()
 
-	var updaterec models.UpdateRecord
-	db.DB.First(&updaterec, ur.ID)
-	updaterec.Status = models.UpdateStatusCreated
-	db.DB.Save(&updaterec)
+	var updateTransaction models.UpdateTransaction
+	db.DB.First(&updateTransaction, ur.ID)
+	updateTransaction.Status = models.UpdateStatusCreated
+	db.DB.Save(&updateTransaction)
 
 	log.Debugf("RepoBuilder::updateCommit: %#v", ur.Commit)
 
@@ -265,19 +253,19 @@ func (rb *RepoBuilder) BuildRepo(ur *models.UpdateRecord) (*models.UpdateRecord,
 	}
 	// FIXME: Need to actually do something with the return string for Server
 
-	// NOTE: This relies on the file path being cfg.UpdateTempPath/models.UpdateRecord.ID
+	// NOTE: This relies on the file path being cfg.UpdateTempPath/models.UpdateTransaction.ID
 	repoURL, err := uploader.UploadRepo(filepath.Join(path, "repo"), ur.Account)
 	if err != nil {
 		return nil, err
 	}
 
-	var updateRecDone models.UpdateRecord
-	db.DB.First(&updateRecDone, ur.ID)
-	updateRecDone.Status = models.UpdateStatusSuccess
-	updateRecDone.UpdateRepoURL = repoURL
-	db.DB.Save(&updateRecDone)
+	var updateTransactionDone models.UpdateTransaction
+	db.DB.First(&updateTransactionDone, ur.ID)
+	updateTransactionDone.Status = models.UpdateStatusSuccess
+	updateTransactionDone.UpdateRepoURL = repoURL
+	db.DB.Save(&updateTransactionDone)
 
-	return &updateRecDone, nil
+	return &updateTransactionDone, nil
 }
 
 // DownloadExtractVersionRepo Download and Extract the repo tarball to dest dir

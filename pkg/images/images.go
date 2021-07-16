@@ -182,7 +182,7 @@ func Create(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(1 * time.Minute)
 		}
 		log.Infof("Commit %#v for Image %#v is ready. Creating OSTree repo.", i.Commit, image)
-		update := &models.UpdateRecord{
+		update := &models.UpdateTransaction{
 			Commit:  i.Commit,
 			Account: i.Account,
 		}
@@ -423,7 +423,7 @@ func CreateInstallerForImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	headers := common.GetOutgoingHeaders(r)
-	var update *models.UpdateRecord
+	var update *models.UpdateTransaction
 	result := db.DB.Where("update_commit_id = ? and status = ?", image.Commit.ID, models.UpdateStatusSuccess).Last(&update)
 	if result.Error != nil {
 		err := errors.NewBadRequest("Update wasn't found in the database")

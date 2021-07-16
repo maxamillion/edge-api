@@ -68,6 +68,10 @@ func Init() {
 	options.SetDefault("OpenAPIFilePath", "./cmd/spec/openapi.json")
 	options.AutomaticEnv()
 
+	if options.GetBool("Debug") {
+		options.Set("LogLevel", "DEBUG")
+	}
+
 	kubenv := viper.New()
 	kubenv.AutomaticEnv()
 

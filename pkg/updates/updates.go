@@ -26,16 +26,11 @@ import (
 	"github.com/redhatinsights/edge-api/pkg/models"
 
 	"github.com/cavaliercoder/grab"
+	apierrors "github.com/redhatinsights/edge-api/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
 // MakeRouter adds support for operations on update
-
-// UpdatesMakeRouter adds support for operations on commits
-func UpdatesMakeRouter(sub chi.Router) {
-	sub.Post("/", UpdatesAdd)
-	sub.Get("/", UpdatesGetAll)
-}
 func MakeRouter(sub chi.Router) {
 	sub.With(common.Paginate).Get("/", GetUpdates)
 	sub.Post("/", AddUpdate)
@@ -72,14 +67,14 @@ func getDevicesByID(w http.ResponseWriter, r *http.Request) {
 			devices, err := devices.ReturnDevicesByID(w, r)
 			fmt.Printf("validUuid devices: %v\n", devices)
 			if err != nil {
-				err := errors.NewInternalServerError()
+				err := apierrors.NewInternalServerError()
 				err.Title = fmt.Sprintf("Failed to get device %s", uuid)
 				w.WriteHeader(err.Status)
 				return
 			}
 			json.NewEncoder(w).Encode(&devices)
 		} else {
-			err := errors.NewBadRequest("Invalid UUID")
+			err := apierrors.NewBadRequest("Invalid UUID")
 			err.Title = fmt.Sprintf("Invalid UUID - %s", uuid)
 			w.WriteHeader(err.Status)
 			return
@@ -94,7 +89,7 @@ func getDevicesByTag(w http.ResponseWriter, r *http.Request) {
 		devices, err := devices.ReturnDevicesByTag(w, r)
 		fmt.Printf("devices: %v\n", devices)
 		if err != nil {
-			err := errors.NewInternalServerError()
+			err := apierrors.NewInternalServerError()
 			err.Title = fmt.Sprintf("Failed to get devices from tag %s", tags)
 			w.WriteHeader(err.Status)
 			return
@@ -134,7 +129,7 @@ func updateOSTree(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		err := errors.NewInternalServerError()
+		err := apierrors.NewInternalServerError()
 		err.Title = fmt.Sprintf("No devices in this tag %s", updateTransaction.Tag)
 		w.WriteHeader(err.Status)
 		return
@@ -194,23 +189,38 @@ func getCommitFromDB(commitID uint) (*models.Commit, error) {
 	return &commit, nil
 }
 
+type UpdatePostJSON struct {
+	CommitID   uint   `json:"CommitID"`
+	Tag        string `json:"Tag"`
+	DeviceUUID string `json:"DeviceUUID"`
+}
+
 func updateFromReadCloser(rc io.ReadCloser) (*models.UpdateTransaction, error) {
 	defer rc.Close()
+	var updateJSON UpdatePostJSON
+	err := json.NewDecoder(rc).Decode(&updateJSON)
+	log.Debugf("updateFromReadCloser::updateJSON: %#v", updateJSON)
+
+	if !(updateJSON.CommitID == 0) {
+		return nil, errors.New("Invalid CommitID provided")
+	}
+	if (updateJSON.Tag == "") && (updateJSON.DeviceUUID == "") {
+		return nil, errors.New("At least one of Tag or DeviceUUID required.")
+	}
+
 	var update models.UpdateTransaction
-	err := json.NewDecoder(rc).Decode(&update)
-
+	update.Commit, err = getCommitFromDB(updateJSON.CommitID)
+	if updateJSON.Tag != "" {
+		append(update.InventoryHosts, getDevicesByTag(updateJSON.Tag))
+	}
+	if updateJSON.DeviceUUID != "" {
+		append(update.InventoryHosts, getDevicesByID(updateJSON.DeviceUUID))
+	}
 	log.Debugf("updateFromReadCloser::update: %#v", update)
-	log.Debugf("updateFromReadCloser::update.Commit: %#v", update.Commit)
-
-	if !(update.Commit.OSTreeCommit == "") {
-		return nil, errors.New("Invalid Commit OSTree Hash provided")
-	}
-	if len(update.InventoryHosts) == 0 {
-		return nil, errors.New("Inventory Hosts to update required")
-	}
-
 	return &update, err
 }
+
+type key int
 
 const updateKey key = 0
 
@@ -241,8 +251,8 @@ func UpdateCtx(next http.Handler) http.Handler {
 	})
 }
 
-// UpdatesAdd add an object to the database for an account
-func UpdatesAdd(w http.ResponseWriter, r *http.Request) {
+// AddUpdate adds an object to the database for an account
+func AddUpdate(w http.ResponseWriter, r *http.Request) {
 
 	update, err := updateFromReadCloser(r.Body)
 	log.Debugf("UpdatesAdd::update: %#v", update)

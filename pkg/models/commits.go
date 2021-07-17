@@ -21,14 +21,14 @@ type Commit struct {
 	ComposeJobID         string    `json:"ComposeJobID"`
 	Status               string    `json:"Status"`
 	RepoID               uint      `json:"RepoID"`
-	Repo                 *Repo     `json:"Repo" gorm:"many2many:commit_repo`
+	Repo                 *Repo     `json:"Repo" `
 }
 
 // Repo is the delivery mechanism of a Commit over HTTP
 type Repo struct {
 	gorm.Model
 	URL    string `json:"RepoURL"`
-	Status string `json:RepoStatus"`
+	Status string `json:"RepoStatus"`
 }
 
 // Package represents the packages a Commit can have

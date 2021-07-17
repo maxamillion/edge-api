@@ -1,21 +1,14 @@
 package commits
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
+
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/go-chi/chi"
 
 	"github.com/redhatinsights/edge-api/config"
 	"github.com/redhatinsights/edge-api/pkg/common"
@@ -33,158 +26,10 @@ func InitRepoBuilder() {
 	RepoBuilderInstance = &RepoBuilder{}
 }
 
-func getCommitFromDB(commitID uint) (*models.Commit, error) {
-	var commit models.Commit
-	result := db.DB.First(&commit, commitID)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	return &commit, nil
-}
-
-func updateFromReadCloser(rc io.ReadCloser) (*models.UpdateTransaction, error) {
-	defer rc.Close()
-	var update models.UpdateTransaction
-	err := json.NewDecoder(rc).Decode(&update)
-
-	log.Debugf("updateFromReadCloser::update: %#v", update)
-	log.Debugf("updateFromReadCloser::update.Commit: %#v", update.Commit)
-
-	if !(update.Commit.OSTreeCommit == "") {
-		return nil, errors.New("Invalid Commit OSTree Hash provided")
-	}
-	if len(update.InventoryHosts) == 0 {
-		return nil, errors.New("Inventory Hosts to update required")
-	}
-
-	return &update, err
-}
-
-// UpdatesMakeRouter adds support for operations on commits
-func UpdatesMakeRouter(sub chi.Router) {
-	sub.Post("/", UpdatesAdd)
-	sub.Get("/", UpdatesGetAll)
-	sub.Route("/{updateID}", func(r chi.Router) {
-		r.Use(UpdateCtx)
-		r.Get("/", UpdatesGetByID)
-		r.Put("/", UpdatesUpdate)
-	})
-}
-
-const updateKey key = 0
-
-// UpdateCtx is a handler for Update requests
-func UpdateCtx(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var update models.UpdateTransaction
-		account, err := common.GetAccount(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		log.Debugf("UpdateCtx::update: %#v", update)
-		if updateID := chi.URLParam(r, "updateID"); updateID != "" {
-			id, err := strconv.Atoi(updateID)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			result := db.DB.Where("account = ?", account).First(&update, id)
-			if result.Error != nil {
-				http.Error(w, result.Error.Error(), http.StatusNotFound)
-				return
-			}
-			ctx := context.WithValue(r.Context(), updateKey, &update)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		}
-	})
-}
-
-// UpdatesAdd add an object to the database for an account
-func UpdatesAdd(w http.ResponseWriter, r *http.Request) {
-
-	update, err := updateFromReadCloser(r.Body)
-	log.Debugf("UpdatesAdd::update: %#v", update)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	update.Account, err = common.GetAccount(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Check to make sure we're not duplicating the job
-	// FIXME - this didn't work and I don't have time to debug right now
-	// FIXME - handle UpdateTransaction Commit vs UpdateCommitID
-	/*
-		var dupeRecord models.UpdateTransaction
-		queryDuplicate := map[string]interface{}{
-			"Account":        update.Account,
-			"InventoryHosts": update.InventoryHosts,
-			"OldCommitIDs":   update.OldCommitIDs,
-		}
-		result := db.DB.Where(queryDuplicate).Find(&dupeRecord)
-		if result.Error == nil {
-			if dupeRecord.UpdateCommitID != 0 {
-				http.Error(w, "Can not submit duplicate update job", http.StatusInternalServerError)
-				return
-			}
-		}
-	*/
-
-	db.DB.Create(&update)
-
-	go RepoBuilderInstance.BuildRepo(update)
-}
-
-// UpdatesGetAll update objects from the database for an account
-func UpdatesGetAll(w http.ResponseWriter, r *http.Request) {
-}
-
-// UpdatesGetByID obtains an update from the database for an account
-func UpdatesGetByID(w http.ResponseWriter, r *http.Request) {
-	if update := getUpdate(w, r); update != nil {
-		json.NewEncoder(w).Encode(update)
-	}
-}
-
-// UpdatesUpdate a update object in the database for an an account
-func UpdatesUpdate(w http.ResponseWriter, r *http.Request) {
-	update := getUpdate(w, r)
-	if update == nil {
-		return
-	}
-
-	incoming, err := updateFromReadCloser(r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	now := time.Now()
-	incoming.ID = update.ID
-	incoming.CreatedAt = now
-	incoming.UpdatedAt = now
-	db.DB.Save(&incoming)
-
-	json.NewEncoder(w).Encode(incoming)
-}
-
-func getUpdate(w http.ResponseWriter, r *http.Request) *models.UpdateTransaction {
-	ctx := r.Context()
-	update, ok := ctx.Value(updateKey).(*models.UpdateTransaction)
-	if !ok {
-		http.Error(w, "must pass id", http.StatusBadRequest)
-		return nil
-	}
-	return update
-}
-
 // RepoBuilderInterface defines the interface of a repository builder
 type RepoBuilderInterface interface {
 	BuildRepo(ur *models.UpdateTransaction) (*models.UpdateTransaction, error)
+	ImportRepo(c *models.Commit) error
 }
 
 // RepoBuilder is the implementation of a RepoBuilderInterface
@@ -195,10 +40,10 @@ type RepoBuilder struct{}
 func (rb *RepoBuilder) BuildRepo(ur *models.UpdateTransaction) (*models.UpdateTransaction, error) {
 	cfg := config.Get()
 
-	var updateTransaction models.UpdateTransaction
-	db.DB.First(&updateTransaction, ur.ID)
-	updateTransaction.Status = models.UpdateStatusCreated
-	db.DB.Save(&updateTransaction)
+	var update models.UpdateTransaction
+	db.DB.First(&update, ur.ID)
+	update.Status = models.UpdateStatusCreated
+	db.DB.Save(&update)
 
 	log.Debugf("RepoBuilder::updateCommit: %#v", ur.Commit)
 
@@ -253,19 +98,58 @@ func (rb *RepoBuilder) BuildRepo(ur *models.UpdateTransaction) (*models.UpdateTr
 	}
 	// FIXME: Need to actually do something with the return string for Server
 
-	// NOTE: This relies on the file path being cfg.UpdateTempPath/models.UpdateTransaction.ID
-	repoURL, err := uploader.UploadRepo(filepath.Join(path, "repo"), ur.Account)
+	// NOTE: This relies on the file path being cfg.UpdateTempPath/models.Repo.ID/
+	repoURL, err := uploader.UploadRepo(filepath.Join(path, "repo"), strconv.FormatUint(uint64(ur.Commit.RepoID), 10))
 	if err != nil {
 		return nil, err
 	}
 
-	var updateTransactionDone models.UpdateTransaction
-	db.DB.First(&updateTransactionDone, ur.ID)
-	updateTransactionDone.Status = models.UpdateStatusSuccess
-	updateTransactionDone.UpdateRepoURL = repoURL
-	db.DB.Save(&updateTransactionDone)
+	var updateDone models.UpdateTransaction
+	db.DB.First(&updateDone, ur.ID)
+	updateDone.Status = models.UpdateStatusSuccess
+	updateDone.Commit.Repo.URL = repoURL
+	db.DB.Save(&updateDone)
 
-	return &updateTransactionDone, nil
+	return &updateDone, nil
+}
+
+// ImportRepo (unpack and upload) a single repo
+func (rb *RepoBuilder) ImportRepo(c *models.Commit) error {
+	cfg := config.Get()
+
+	path := filepath.Join(cfg.UpdateTempPath, strconv.FormatUint(uint64(c.RepoID), 10))
+	log.Debugf("RepoBuilder::path: %#v", path)
+	err := os.MkdirAll(path, os.FileMode(int(0755)))
+	if err != nil {
+		return err
+	}
+	err = os.Chdir(path)
+	if err != nil {
+		return err
+	}
+	DownloadExtractVersionRepo(c, path)
+
+	var uploader Uploader
+	uploader = &FileUploader{
+		BaseDir: path,
+	}
+	if cfg.BucketName != "" {
+		uploader = NewS3Uploader()
+	}
+
+	// NOTE: This relies on the file path being cfg.UpdateTempPath/models.Repo.ID/
+	repoURL, err := uploader.UploadRepo(filepath.Join(path, "repo"), strconv.FormatUint(uint64(c.RepoID), 10))
+	if err != nil {
+		return err
+	}
+
+	var repo models.Repo
+	db.DB.First(&repo, c.RepoID)
+	repo.Status = models.UpdateStatusSuccess
+	repo.URL = repoURL
+	db.DB.Save(&repo)
+
+	return nil
 }
 
 // DownloadExtractVersionRepo Download and Extract the repo tarball to dest dir

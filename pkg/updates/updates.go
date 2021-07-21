@@ -98,6 +98,8 @@ func updateFromHTTP(w http.ResponseWriter, r *http.Request) (*models.UpdateTrans
 		}
 	}
 
+	log.Debugf("updateFromHTTP::inventory: %#v", inventory)
+
 	// Create the models.UpdateTransaction
 	update := models.UpdateTransaction{}
 
@@ -123,8 +125,11 @@ func updateFromHTTP(w http.ResponseWriter, r *http.Request) (*models.UpdateTrans
 			return &models.UpdateTransaction{}, err
 		} else {
 			log.Infof("Old Repo not found in database for CommitID, creating new one: %d", update.Commit.ID)
-			update.Repo = &models.Repo{}
-			update.Repo.Commit = update.Commit
+			repo := new(models.Repo)
+			repo.Commit = update.Commit
+			db.DB.Create(&repo)
+			update.Repo = repo
+
 		}
 	}
 
@@ -145,6 +150,7 @@ func updateFromHTTP(w http.ResponseWriter, r *http.Request) (*models.UpdateTrans
 				log.Infof("Existing Device not found in database, creating new one: %s", device.ID)
 				updateDevice = new(models.Device)
 				updateDevice.UUID = device.ID
+				db.DB.Create(&updateDevice)
 			}
 		}
 		updateDevice.DesiredHash = update.Commit.OSTreeCommit

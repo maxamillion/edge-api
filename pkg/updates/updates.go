@@ -39,8 +39,7 @@ func GetUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// FIXME - need to sort out how to get this query to be against commit.account
-	result := db.DB.Where("account = ?", account).Find(&updates)
-	log.Debugf("GetUpdates::result: %#v", result)
+	result := db.DB.Preload("DispatchRecords").Where("update_transactions.account = ?", account).Joins("Commit").Joins("Repo").Joins("Devices").Find(&updates)
 	if result.Error != nil {
 		http.Error(w, result.Error.Error(), http.StatusBadRequest)
 		return

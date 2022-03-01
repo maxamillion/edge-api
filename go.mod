@@ -14,7 +14,6 @@ require (
 	github.com/go-openapi/strfmt v0.21.1 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/golang/mock v1.6.0
-	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/jackc/pgx/v4 v4.14.1 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20170716094938-74609b86c936
@@ -22,11 +21,10 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.18.1
-	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
 	github.com/prometheus/client_golang v1.12.1
 	github.com/redhatinsights/app-common-go v1.6.0
 	github.com/redhatinsights/platform-go-middlewares v0.10.0
-	github.com/segmentio/kafka-go v0.4.27
+	github.com/segmentio/kafka-go v0.4.29
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/viper v1.10.1
 	go.mongodb.org/mongo-driver v1.8.1 // indirect
